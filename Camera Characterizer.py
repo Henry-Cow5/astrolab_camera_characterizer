@@ -18,6 +18,7 @@ import sys
 #import pandas as pd
 #from joypy import joyplot
 
+#A way to extract the gain automatically will be added in the future.
 gain_dict = {'CSC-00085 12': 0.69, 'CSC-00085 16': 1.41, 'CSC-00542 12': 0.61,
              'CSC-00542 16': 1.26}
 
@@ -69,10 +70,13 @@ def fits_info(fits_list, path, gain_dict):
         The list of .fits file names in the gotten directory
     path : str
         Path name
+    gain_dict : dict
+        The dictionary of known camera serial numbers and bit sizes
+        with corresponding gain
 
     Returns
     -------
-    dim_x, dim_y : int
+    dim_x, dim_y : ints
         The dimensions of the pixel in the x and y directions
     exposure : list
         The list of exposure times of the .fits files
@@ -143,6 +147,8 @@ def stack_converter(stack, gain):
     print('Converting to electrons. This will take a while')
     if os.path.exists('mean.memmap'):
         os.remove('mean.memmap')
+    #This subtraction is memory intensive, so we want to make it easier with
+    #a memmap
     mean = np.memmap('mean.memmap', dtype='float64', mode ='w+',
                      shape=stack.shape[1:])
     np.copyto(mean, np.mean(stack, axis=0))
@@ -182,9 +188,6 @@ def dark_dictionary_maker(stack, exposure):
     ----------
     stack : 3D numpy array (n, p, p) n is number of images, and p is pixels
         The stack of images together.
-    column_number : int
-        The largest power of two the image dimensions can be evenly divided by.
-        If this is 1 it gives an error for odd pixel dimensions.
     exposure : list
         The list of exposure times of the .fits files
 
@@ -280,7 +283,7 @@ def stdev_reporter(stdev, median, noise_criteria):
     plt.xlabel('Number of electrons')
     plt.ylabel('Number of pixels')
     y, _, _ = plt.hist(stdev.flatten(), bins='auto')
-    #noise bins
+    #noise bin plotting
     for count, pair in enumerate(noise_criteria):
         if pair[1]==0:
             #Replacement of last bin size
@@ -363,15 +366,16 @@ def noise_getter(noisy_stds, stack, count, noise_criteria, smallest_bin):
         The size of the smallest bin.
     Returns
     -------
-    noisy_pixel_dict : dict
-        The pixel index of each noisy pixel paired with the list of that 
+    pixel_dict : dict
+        The pixel index of each binned pixel paired with the list of that 
         pixel's values across all layers.'
 
     """
     print('Isolating pixels for bin between ' + str(noise_criteria[count]) + 
           ' median standard deviations')
     noisy_std_indices = np.argwhere(noisy_stds)
-    #random sort to get a representative sample
+    #random sort to get a representative sample. Processing the largest bins
+    #takes too long and the plots are too cluttered to see.
     np.random.shuffle(noisy_std_indices)
     indices_list = noisy_std_indices.tolist()
     
@@ -510,9 +514,17 @@ def bias_run(stack, dim_x, dim_y, noise_criteria):
     print('Creating standard deviation image')
     mini = np.min(stack)
     maxi = np.max(stack)
-    #Calculates standard deviation image
+    #Calculates and plots standard deviation image
     stack_std = np.std(stack, axis=0)
-    show_array(stack_std)
+    fig = plt.figure()
+    plt.title('Standard Deviation Image')
+    #plt.matshow is kind of weird. We have to add it to a subplot for it to show.
+    axo = fig.add_subplot(111)
+    cax = axo.matshow(stack_std)
+    fig.colorbar(cax, label='Electrons')
+    plt.show()
+    plt.close()
+    #Getting some stats from the data
     median_std = np.median(stack_std)
     noise_criteria = stdev_reporter(stack_std, median_std, noise_criteria)
     print('Now checking for noisy pixels')
@@ -558,7 +570,7 @@ def Main_body(gain_dict):
             #Here we set the criteria for the bins when sampling bias noise.
             #Last bin value will be corrected for max standard devation. Make
             #sure final value is always 0.
-            noise_criteria = [[0,1], [1, 1.5], [1.5,2.5], [2.5, 3.5], [3.5, 4], [4, 0]]
+            noise_criteria = [[0,2], [2, 4], [4,0]]
             bias_run(stack, dim_x, dim_y, noise_criteria)
             return
         elif inpt == 'd':
