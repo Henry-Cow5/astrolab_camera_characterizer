@@ -8,16 +8,12 @@ are deleted after the program runs.
 """
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
-import math
 import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
-#from matplotlib import cm
 import os
 import os.path
 import sys
-#import pandas as pd
-#from joypy import joyplot
 
 #A way to extract the gain automatically will be added in the future.
 gain_dict = {'CSC-00085 12': 0.69, 'CSC-00085 16': 1.41, 'CSC-00542 12': 0.61,
@@ -339,14 +335,6 @@ def noise_check(stack_std, median_std, dim_x, dim_y, noise_criteria, stdev_val):
         temp_count = 0
         noisy_temp = []
         count_list = []
-        #For each pair creates a noisy_temp 1d array which will be reshaped into
-        #2d image of only items in that bin.
-        # for std in stack_std.flatten():
-        #     if std > pair[0]*median_std and std <= pair[1]*median_std:
-        #         noisy_temp.append(std)
-        #         temp_count+=1
-        #     else:
-        #         noisy_temp.append(0)
         #The very inelegant binning method. Because we only want to count each
         #point once, we use this method of counting.
         for std in stack_std.flatten():
@@ -519,22 +507,6 @@ def pixel_hist_maker(noisy_pixel_dict, count, noise_criteria, mini, maxi):
     return bins
 
 def joy_maker(dict_list, noise_criteria, bins):
-    # # joy_df = pd.DataFrame()
-    # # for count, dit in enumerate(dict_list):
-    # #     joy_df['bin'] = [str(noise_criteria[count]) for i in \
-    # #              range(len(list(dit.values())))]
-    # #     joy_df['val' + str(count)] = list(dit.values())
-    # new_dict = {}
-    # for bin, dit in enumerate(dict_list):
-    #     new_dict['bin ' + str(bin+1)] = [item for sublist in dit.values() for item in sublist]
-    # # print(joy_df)
-    # plt.figure()
-    # # joyplot(data=joy_df,
-    # #     by='bin',
-    # #     column=['val' + str(count) for count in range(len(dict_list))])
-    # joyplot(new_dict, linecolor='black', hist=True, bins=bins, colormap=cm.autumn_r)
-    # plt.show()
-    # plt.close()
     fig = plt.figure()
     fig.set_size_inches(11, 17)
     fig.set_dpi(100)
