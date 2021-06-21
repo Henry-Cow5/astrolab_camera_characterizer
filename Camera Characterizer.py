@@ -8,7 +8,6 @@ are deleted after the program runs.
 """
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
-warnings.simpltfilter(action='ignore', category='MatplotlibDeprecationWarning')
 import math
 import numpy as np
 from astropy.io import fits
@@ -279,30 +278,29 @@ def stdev_reporter(stdev, median, noise_criteria):
     #standard deviation histogram
     mini = np.min(stdev)
     maxi = np.max(stdev)
-    print('stdev Min:' + str(mini))
-    print('stdev Max:' + str(maxi))
-    print('stdev Median:' + str(median))
-    print('stdev rms:', np.sqrt(np.mean(stdev**2)))
     stdev_val = np.std(stdev)
+    print('stdev Min:' + str(mini))
+    print('stdev Max: ' + str(maxi))
+    print('stdev Median: ' + str(median))
+    print('stdev rms: ', np.sqrt(np.mean(stdev**2)))
+    print('stdev stdev: ' + str(stdev_val))
     plt.title('stdev pixel value histogram')
     plt.xlabel('Number of electrons')
     plt.ylabel('Number of pixels')
     y, _, _ = plt.hist(stdev.flatten(), bins='auto')
     #Creating bins
     bin_max = (maxi-median)/stdev_val
-    noise_criteria = [[i, i+1] for i in range(math.floor(bin_max)-2)]
-    noise_criteria.append([math.floor(bin_max)-3, bin_max])
     #noise bin plotting
-    # for count, pair in enumerate(noise_criteria):
-    #     if pair[1]==0:
-    #         #Replacement of last bin size
-    #         pair[1] = np.max(stdev)/median
-    #     plt.axvline(pair[0]*median, color='red')
-    #     plt.axvline(pair[1]*median, color='red')
-    #     plt.text((pair[0]*median+pair[1]*median)/2, y.max(), 'Bin ' + str(count+1),
-    #              ha='center')
-    # plt.show()
-    # plt.close()
+    for count, pair in enumerate(noise_criteria):
+        if pair[1] == 0:
+            pair[1] = bin_max
+        plt.axvline(-pair[1]*stdev_val + median, color='red')
+        plt.axvline(pair[1]*stdev_val + median, color='red')
+        plt.text((pair[0]*stdev_val + pair[1]*stdev_val + 2*median)/2, y.max(),
+                 str(count+1), ha='center')
+    plt.xlim(left=0)
+    plt.show()
+    plt.close()
     return(noise_criteria, stdev_val)
 
 def noise_check(stack_std, median_std, dim_x, dim_y, noise_criteria, stdev_val):
@@ -351,34 +349,39 @@ def noise_check(stack_std, median_std, dim_x, dim_y, noise_criteria, stdev_val):
         #         noisy_temp.append(0)
         #The very inelegant binning method. Because we only want to count each
         #point once, we use this method of counting.
-        for count2, std in enumerate(stack_std.flatten()):
-            if count2 == 0:
-                if (std >= (pair[0]*stdev_val + median_std) and \
-                    std < (pair[1]*stdev_val + median_std)) or \
-                    (std < (-pair[0]*stdev_val + median_std) and \
-                     std > (-pair[1]*stdev_val + median_std)):
+        for std in stack_std.flatten():
+            floor = pair[0]*stdev_val
+            ceil = pair[1]* stdev_val
+            if count == 0:
+                if (std >= (floor + median_std) and \
+                    std < (ceil + median_std)) or \
+                    (std < (-floor + median_std) and \
+                      std > (-ceil + median_std)):
                         noisy_temp.append(std)
+                        temp_count += 1
                 else:
                     noisy_temp.append(0)
-            elif count2 == len(stack_std.flatten())-1:
+            elif count == len(noise_criteria)-1:
                 if (std >= (pair[0]*stdev_val + median_std) and \
                     std < (pair[1]*stdev_val + median_std)) or \
                     (std <= (-pair[0]*stdev_val + median_std) and \
-                     std > (-pair[1]*stdev_val + median_std)):
+                      std > (-pair[1]*stdev_val + median_std)):
                         noisy_temp.append(std)
+                        temp_count += 1
                 else:
                     noisy_temp.append(0)
             else:
                 if (std > (pair[0]*stdev_val + median_std) and \
                     std <= (pair[1]*stdev_val + median_std)) or \
                     (std < (-pair[0]*stdev_val + median_std) and \
-                     std > (-pair[1]*stdev_val + median_std)):
+                      std > (-pair[1]*stdev_val + median_std)):
                         noisy_temp.append(std)
+                        temp_count += 1
                 else:
                     noisy_temp.append(0)
         noisy_stds[count] = noisy_temp
         print(str(temp_count) + ' pixels found with between ' \
-            + str(noise_criteria[count]) + ' median standard deviations. That' \
+            + str(noise_criteria[count]) + ' standard deviations. That' \
             ' is ~' + '%.3f' % (temp_count/len(stack_std.flatten())*100) + '% of pixels.')
         count_list = np.append(count_list, temp_count)
     smallest_bin = min(count_list)
@@ -408,7 +411,7 @@ def noise_getter(noisy_stds, stack, count, noise_criteria, smallest_bin):
 
     """
     print('Isolating pixels for bin between ' + str(noise_criteria[count]) + 
-          ' median standard deviations')
+          ' standard deviations')
     noisy_std_indices = np.argwhere(noisy_stds)
     #random sort to get a representative sample. Processing the largest bins
     #takes too long and the plots are too cluttered to see.
@@ -489,13 +492,13 @@ def pixel_hist_maker(noisy_pixel_dict, count, noise_criteria, mini, maxi):
         #plt.close()
 #Creates complete histogram
     print('Plotting data for pixels between ' + str(noise_criteria[count])
-              + ' median standard deviations')
+              + ' standard deviations')
     if str(noise_criteria[count])[1:7].endswith(']'):
-        plt.title('Pixel histogram for pixels within (' + str(noise_criteria[count])[1:7]
-              + ' median standard deviations')
+        plt.title('Pixel histogram for pixels within (' + str(noise_criteria[count])[1:8]
+              + ' standard deviations')
     else:
-        plt.title('Pixel histogram for pixels within (' + str(noise_criteria[count])[1:7]
-              + '] median standard deviations')
+        plt.title('Pixel histogram for pixels within (' + str(noise_criteria[count])[1:8]
+              + '] standard deviations')
     plt.hist(noisy_pixel_dict.values(), bins, histtype='step', linewidth=0.5)
     plt.xlabel('Number of electrons')
     plt.ylabel('Number of pixels')
@@ -503,12 +506,13 @@ def pixel_hist_maker(noisy_pixel_dict, count, noise_criteria, mini, maxi):
     plt.close()
 
 #Creates scatter plot of last bin
+    print('Plotting pixelx of noisiest bin')
     if count == len(noise_criteria)-1:
         for index,_ in noisy_pixel_dict.items():
             indx = [int(x) + 1 for x in index.split(',')]
             plt.scatter(indx[0], indx[1], color='blue', s=0.6)
-        plt.title('Map of pixels between (' + str(noise_criteria[count])[1:7]
-                  + '] median standard deviations')
+        plt.title('Map of pixels between (' + str(noise_criteria[count])[1:8]
+                  + '] standard deviations')
         plt.gca().set_aspect('equal')
         plt.show()
         plt.close()
@@ -606,7 +610,7 @@ def Main_body(gain_dict):
             #Here we set the criteria for the bins when sampling bias noise.
             #Last bin value will be corrected for max standard devation. Make
             #sure final value is always 0.
-            noise_criteria = [[0,2], [2, 4], [4,0]]
+            noise_criteria = [[0,1.5], [1.5, 3], [3,4.5], [4.5, 6], [6,0]]
             bias_run(stack, dim_x, dim_y, noise_criteria)
             return
         elif inpt == 'd':
