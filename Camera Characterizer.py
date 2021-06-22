@@ -11,6 +11,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import os
 import os.path
 import sys
@@ -80,11 +81,13 @@ def fits_info(fits_list, path, gain_dict):
     gain : float
         The gain for converting units
     """
+    
     #list of fits header get
     hdu_list = [fits.getheader(path +'/' + str(fit)) for fit in fits_list]
     exposure = []
     dim_x = 0
     dim_y = 0
+    
     for count, hdu in enumerate(hdu_list):
         #There seems to be a few standards for headers. We try these exceptions
         #to catch all the names we have found.
@@ -124,13 +127,16 @@ def stacker(path, fits_list, gain, dim_x, dim_y):
     print("Reading in images")
     image_concat = [fits.getdata(path + '/' + str(fit)) for fit in fits_list]
     print("Stacking images")
+    
     #We have to remove stack if the program crashed earlier
     if os.path.exists('stack.memmap'):
         os.remove('stack.memmap')
+        
     #The stack is stored written to disk in the same folder the program is
     #located in
     stack = np.memmap('stack.memmap', dtype='float64', mode='w+',
                             shape=(len(image_concat), dim_y, dim_x))
+    
     #Because of how numpy arrays work, we have to manually assign contents
     #to the memmapped arrays, so as to not create copies which would destroy 
     #our memory.
@@ -141,16 +147,20 @@ def stacker(path, fits_list, gain, dim_x, dim_y):
 
 def stack_converter(stack, gain):
 #Converts the stack from ADU to electrons
-    print('Converting to electrons. This will take a while')
+
+    print('Converting to electrons. This will take a while for large stacks')
     if os.path.exists('mean.memmap'):
         os.remove('mean.memmap')
+        
     #This subtraction is memory intensive, so we want to make it easier with
     #a memmap
     mean = np.memmap('mean.memmap', dtype='float64', mode ='w+',
                      shape=stack.shape[1:])
     np.copyto(mean, np.mean(stack, axis=0))
+    
     for i in range(stack.shape[0]):
         stack[i] = (stack[i]-mean)*gain
+        
     #Removing the mean memmap
     mean._mmap.close()
     del mean
@@ -175,6 +185,12 @@ def set_order_preserve(list):
     seen = set()
     seen_add = seen.add 
     return [x for x in list if not (x in seen or seen_add(x))]
+
+def fmt(x, pos):
+#Helper function for generating ticks with scientific notation
+    a, b = '{:.2e}'.format(x).split('e')
+    b = int(b)
+    return r'${} \times 10^{{{}}}$'.format(a, b)
 
 def dark_dictionary_maker(stack, exposure):
     """
@@ -226,13 +242,16 @@ def mean_iterator(dark_dictionary):
     """
     
     print('Creating mean images')
+    
     #Iterating through dictionary for mean
     mean_dict = {}
     mean_dict_unfil={}
     for exp, sub_arr in dark_dictionary.items():
         mean_dict_unfil[exp] = np.mean(sub_arr, axis=0)
+        
     #Filtering results with sigma clipping
     clip_criterion = 5
+    
     print('Filtering results')
     for exp, sub_arr in mean_dict_unfil.items():
         median = np.median(sub_arr)
@@ -284,8 +303,10 @@ def stdev_reporter(stdev, median, noise_criteria):
     plt.xlabel('Number of electrons')
     plt.ylabel('Number of pixels')
     y, _, _ = plt.hist(stdev.flatten(), bins='auto')
+    
     #Creating bins
     bin_max = (maxi-median)/stdev_val
+    
     #noise bin plotting
     for count, pair in enumerate(noise_criteria):
         if pair[1] == 0:
@@ -330,11 +351,13 @@ def noise_check(stack_std, median_std, dim_x, dim_y, noise_criteria, stdev_val):
     
     #list of lists initialization
     noisy_stds = [[] for i in range(len(noise_criteria))]
+    
     #Starts with the first bin in noise_criteria
     for count, pair in enumerate(noise_criteria):
         temp_count = 0
         noisy_temp = []
         count_list = []
+        
         #The very inelegant binning method. Because we only want to count each
         #point once, we use this method of counting.
         for std in stack_std.flatten():
@@ -367,11 +390,13 @@ def noise_check(stack_std, median_std, dim_x, dim_y, noise_criteria, stdev_val):
                         temp_count += 1
                 else:
                     noisy_temp.append(0)
+                    
         noisy_stds[count] = noisy_temp
         print(str(temp_count) + ' pixels found with between ' \
             + str(noise_criteria[count]) + ' standard deviations. That' \
             ' is ~' + '%.3f' % (temp_count/len(stack_std.flatten())*100) + '% of pixels.')
         count_list = np.append(count_list, temp_count)
+        
     smallest_bin = min(count_list)
     noisy_stds = [np.reshape(arr, (dim_x, dim_y)) for arr in noisy_stds]
     return (noisy_stds, int(smallest_bin))
@@ -398,6 +423,7 @@ def noise_getter(noisy_stds, stack, count, noise_criteria, smallest_bin):
         pixel's values across all layers.'
 
     """
+    
     print('Isolating pixels for bin between ' + str(noise_criteria[count]) + 
           ' standard deviations')
     noisy_std_indices = np.argwhere(noisy_stds)
@@ -444,10 +470,12 @@ def regressor(mean_dictionary, dim_x, dim_y):
     
     print('Regressing each pixel for dark current')
     exposures = list(mean_dictionary.keys())
+    
     #Stacks mean frames per exposure time
     mean_stack = np.stack(mean_dictionary.values())
     dark_curr = np.zeros((dim_y, dim_x))
     bias = np.zeros((dim_y, dim_x))
+    
     #We create a (pxp) 0 array to get the list of indices to iterate 
     #through these images
     ###For future maintainers: this is definitely not the most efficient way
@@ -461,6 +489,7 @@ def regressor(mean_dictionary, dim_x, dim_y):
     print('The median dark current is: ' + str(np.median(dark_curr.flatten())))
     print('The standard deviation of the dark current is: ' + str(np.std(dark_curr.flatten())))
     show_array(dark_curr)
+    show_array(bias)
     return dark_curr, bias
         
 def pixel_hist_maker(noisy_pixel_dict, count, noise_criteria, mini, maxi):
@@ -494,7 +523,7 @@ def pixel_hist_maker(noisy_pixel_dict, count, noise_criteria, mini, maxi):
     plt.close()
 
 #Creates scatter plot of last bin
-    print('Plotting pixelx of noisiest bin')
+    print('Plotting pixel map of noisiest bin')
     if count == len(noise_criteria)-1:
         for index,_ in noisy_pixel_dict.items():
             indx = [int(x) + 1 for x in index.split(',')]
@@ -507,6 +536,7 @@ def pixel_hist_maker(noisy_pixel_dict, count, noise_criteria, mini, maxi):
     return bins
 
 def joy_maker(dict_list, noise_criteria, bins):
+    print('Making joyplot')
     fig = plt.figure()
     fig.set_size_inches(11, 17)
     fig.set_dpi(100)
@@ -523,29 +553,60 @@ def joy_maker(dict_list, noise_criteria, bins):
         
 def bias_run(stack, dim_x, dim_y, noise_criteria):
 #Main body of bias noise analysis
+
     print('Creating standard deviation image')
     mini = np.min(stack)
     maxi = np.max(stack)
-    #Calculates and plots standard deviation image
+    
+    
+    #Calculates and plots images from the data
+    
     stack_std = np.std(stack, axis=0)
-    fig = plt.figure()
+    stack_rms = np.sqrt(np.mean(np.square(stack), axis=0))
+    RNNU = stack_std/stack_rms
+    
+    fig1 = plt.figure()
     plt.title('Standard Deviation Image')
     #plt.matshow is kind of weird. We have to add it to a subplot for it to show.
-    axo = fig.add_subplot(111)
-    cax = axo.matshow(stack_std)
-    fig.colorbar(cax, label='Electrons')
+    ax1 = fig1.add_subplot(111)
+    cax = ax1.matshow(stack_std)
+    fig1.colorbar(cax, label='Electrons')
     plt.show()
     plt.close()
+    
+    fig2 = plt.figure()
+    plt.title('Root Mean Square Image')
+    ax2 = fig2.add_subplot(111)
+    cax = ax2.matshow(stack_rms)
+    fig2.colorbar(cax, label='Electrons')
+    plt.show()
+    plt.close()
+    
+    #RNNU is a little finnicky
+    ticks = np.linspace(np.min(RNNU-1), np.max(RNNU-1), 8)
+    fig3 = plt.figure()
+    plt.title('Readout Noise Non-Uniformity')
+    ax3 = fig3.add_subplot(111)
+    cax = ax3.matshow(RNNU-1)
+    fig3.colorbar(cax, label='RNNU distance from 1', ticks=ticks,
+                  format=ticker.FuncFormatter(fmt))
+    plt.show()
+    plt.close()
+    print('Average RNNU is : ' + str(np.mean(RNNU)))
+    
     #Getting some stats from the data
     median_std = np.median(stack_std)
     noise_criteria, stdev_val = stdev_reporter(stack_std, median_std, noise_criteria)
     print('Now checking for noisy pixels')
+
+
 #Noise analysis starts here
     noisy_stds, smallest_bin = noise_check(stack_std, median_std, dim_x, dim_y,
                                            noise_criteria, stdev_val)
     print('Smallest bin was found to be ' + str(smallest_bin) + '. This will be' +
       ' the representative sample size for plotting. The samples of larger bins' +
       ' are picked randomly to ensure they are representative.')
+    
     print('Running noise analysis on individual pixels for each bin. This process will take a while')
     #noisy_stds is a list of 2d arrays, so we iterate through each array which
     #corresponds to its own bin.
@@ -556,11 +617,13 @@ def bias_run(stack, dim_x, dim_y, noise_criteria):
         bins = pixel_hist_maker(noisy_pixel_dict, count, noise_criteria, mini, maxi)
         dict_list.append(noisy_pixel_dict)
         del noisy_pixel_dict
+        
     #Removing the stack memmap
     stack._mmap.close()
     del stack
     os.remove('stack.memmap')
     joy_maker(dict_list, noise_criteria, bins)
+
 
 def dark_run(stack, dim_x, dim_y, exposure):
 #Main body of dark current analysis
