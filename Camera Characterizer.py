@@ -11,7 +11,6 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import os
 import os.path
 import sys
@@ -182,15 +181,10 @@ def set_order_preserve(list):
         The original list in the same order but with duplicates eliminated
 
     """
+    
     seen = set()
     seen_add = seen.add 
     return [x for x in list if not (x in seen or seen_add(x))]
-
-def fmt(x, pos):
-#Helper function for generating ticks with scientific notation
-    a, b = '{:.2e}'.format(x).split('e')
-    b = int(b)
-    return r'${} \times 10^{{{}}}$'.format(a, b)
 
 def dark_dictionary_maker(stack, exposure):
     """
@@ -510,7 +504,7 @@ def pixel_hist_maker(noisy_pixel_dict, count, noise_criteria, mini, maxi):
 #Creates complete histogram
     print('Plotting data for pixels between ' + str(noise_criteria[count])
               + ' standard deviations')
-    if str(noise_criteria[count])[1:7].endswith(']'):
+    if str(noise_criteria[count])[1:8].endswith(']'):
         plt.title('Pixel histogram for pixels within (' + str(noise_criteria[count])[1:8]
               + ' standard deviations')
     else:
@@ -523,8 +517,8 @@ def pixel_hist_maker(noisy_pixel_dict, count, noise_criteria, mini, maxi):
     plt.close()
 
 #Creates scatter plot of last bin
-    print('Plotting pixel map of noisiest bin')
     if count == len(noise_criteria)-1:
+        print('Plotting pixel map of the noisiest bin')
         for index,_ in noisy_pixel_dict.items():
             indx = [int(x) + 1 for x in index.split(',')]
             plt.scatter(indx[0], indx[1], color='blue', s=0.6)
@@ -541,8 +535,8 @@ def joy_maker(dict_list, noise_criteria, bins):
     fig.set_size_inches(11, 17)
     fig.set_dpi(100)
     iterator=len(dict_list)*100+11
-    for dit in dict_list:
-        if dit==dict_list[0]:
+    for count, dit in enumerate(dict_list):
+        if count==0:
             ax1=plt.subplot(iterator)
         else:
             plt.subplot(iterator, sharex=ax1, sharey=ax1)
@@ -554,45 +548,28 @@ def joy_maker(dict_list, noise_criteria, bins):
 def bias_run(stack, dim_x, dim_y, noise_criteria):
 #Main body of bias noise analysis
 
-    print('Creating standard deviation image')
+    print('Creating statistical images')
+    
     mini = np.min(stack)
     maxi = np.max(stack)
     
     
     #Calculates and plots images from the data
+    stack_std = np.std(stack, axis=0, dtype=np.longdouble)
     
-    stack_std = np.std(stack, axis=0)
-    stack_rms = np.sqrt(np.mean(np.square(stack), axis=0))
-    RNNU = stack_std/stack_rms
-    
+    #Read noise map
     fig1 = plt.figure()
-    plt.title('Standard Deviation Image')
-    #plt.matshow is kind of weird. We have to add it to a subplot for it to show.
+    plt.title('Read Noise Map')
     ax1 = fig1.add_subplot(111)
-    cax = ax1.matshow(stack_std)
-    fig1.colorbar(cax, label='Electrons')
+    cax = ax1.matshow(stack_std, cmap='plasma')
+    fig1.colorbar(cax, label='electrons')
+    stack_std_rms = np.sqrt(np.mean(np.square(stack_std.flatten())))
+    RNNU = np.std(stack_std.flatten())/stack_std_rms
+    plt.text(50, dim_y-150, 'RNNU: ' + str(RNNU*100)[0:5] + '%')
+    plt.text(50, dim_y-50, 'rms: ' + str(stack_std_rms)[0:5] + ' electrons')
     plt.show()
     plt.close()
     
-    fig2 = plt.figure()
-    plt.title('Root Mean Square Image')
-    ax2 = fig2.add_subplot(111)
-    cax = ax2.matshow(stack_rms)
-    fig2.colorbar(cax, label='Electrons')
-    plt.show()
-    plt.close()
-    
-    #RNNU is a little finnicky
-    ticks = np.linspace(np.min(RNNU-1), np.max(RNNU-1), 8)
-    fig3 = plt.figure()
-    plt.title('Readout Noise Non-Uniformity')
-    ax3 = fig3.add_subplot(111)
-    cax = ax3.matshow(RNNU-1)
-    fig3.colorbar(cax, label='RNNU distance from 1', ticks=ticks,
-                  format=ticker.FuncFormatter(fmt))
-    plt.show()
-    plt.close()
-    print('Average RNNU is : ' + str(np.mean(RNNU)))
     
     #Getting some stats from the data
     median_std = np.median(stack_std)
