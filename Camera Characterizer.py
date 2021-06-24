@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import os
 import os.path
 import sys
+from collections import defaultdict
 
 #A way to extract the gain automatically will be added in the future.
 gain_dict = {'CSC-00085 12': 0.69, 'CSC-00085 16': 1.41, 'CSC-00542 12': 0.61,
@@ -143,6 +144,65 @@ def stacker(path, fits_list, gain, dim_x, dim_y):
         stack[count] = image
     stack_converter(stack, gain)
     return (stack)
+
+def list_duplicates(seq):
+    """
+    Helper function for transfer_stacker
+
+    Parameters
+    ----------
+    seq : list
+        some list with repeated elements
+
+    Returns
+    -------
+    gen func
+    An iterable of tuples with the element in 0 and the indices in 1
+
+    """
+    
+    tally = defaultdict(list)
+    for count,item in enumerate(seq):
+        tally[item].append(count)
+    return ((key, locs) for key, locs in tally.items() 
+                            if len(locs)>1)
+
+def transfer_stacker(path, fits_list, dim_x, dim_y, exposure):
+    """
+    Creates a dictionary with the exposure time as key and the corresponding
+    image pairs
+    
+    Parameters
+    ----------
+    path : str
+        Path name
+    fits_list : list
+        The list of .fits file names in the gotten directory.
+    dim_x, dim_y : ints
+        number of pixels in x and y.
+    exposure : list
+        list of exposure times in same order as images
+
+    Returns
+    -------
+    pair_dict : dict
+        A fictionary with the exposure time as key and the corresponding
+    image pairs
+
+    """
+    
+    print('Reading in images')
+    image_concat = [fits.getdata(path + '/' + str(fit)) for fit in fits_list]
+    
+    if os.path.exists('stack.memmap'):
+        os.remove('stack.memmap')
+    
+    pair_dict = {}
+    for dup in list_duplicates(exposure):
+        pair_dict[dup[0]] = [image_concat[index] for index in dup[1]]
+
+    return(pair_dict)
+
 
 def stack_converter(stack, gain):
 #Converts the stack from ADU to electrons
@@ -288,14 +348,14 @@ def stdev_reporter(stdev, median, noise_criteria):
     mini = np.min(stdev)
     maxi = np.max(stdev)
     stdev_val = np.std(stdev)
-    print('stdev Min:' + str(mini))
-    print('stdev Max: ' + str(maxi))
-    print('stdev Median: ' + str(median))
-    print('stdev rms: ', np.sqrt(np.mean(stdev**2)))
-    print('stdev stdev: ' + str(stdev_val))
-    plt.title('stdev pixel value histogram')
-    plt.xlabel('Number of electrons')
-    plt.ylabel('Number of pixels')
+    print('Read Noise Min:' + str(mini))
+    print('Read Noise Max: ' + str(maxi))
+    print('Read Noise Median: ' + str(median))
+    print('Read Noise rms: ', np.sqrt(np.mean(stdev**2)))
+    print('Read Noise stdev: ' + str(stdev_val))
+    plt.title('St. Dev Pixel Value Histogram')
+    plt.xlabel('Number of Electrons')
+    plt.ylabel('Number of Pixels')
     y, _, _ = plt.hist(stdev.flatten(), bins='auto')
     
     #Creating bins
@@ -566,7 +626,7 @@ def bias_run(stack, dim_x, dim_y, noise_criteria):
     stack_std_rms = np.sqrt(np.mean(np.square(stack_std.flatten())))
     RNNU = np.std(stack_std.flatten())/stack_std_rms
     plt.text(50, dim_y-150, 'RNNU: ' + str(RNNU*100)[0:5] + '%')
-    plt.text(50, dim_y-50, 'rms: ' + str(stack_std_rms)[0:5] + ' electrons')
+    plt.text(50, dim_y-50, 'rms: ' + str(stack_std_rms)[0:4] + ' electrons')
     plt.show()
     plt.close()
     
@@ -577,7 +637,7 @@ def bias_run(stack, dim_x, dim_y, noise_criteria):
     print('Now checking for noisy pixels')
 
 
-#Noise analysis starts here
+    #Noise analysis starts here
     noisy_stds, smallest_bin = noise_check(stack_std, median_std, dim_x, dim_y,
                                            noise_criteria, stdev_val)
     print('Smallest bin was found to be ' + str(smallest_bin) + '. This will be' +
@@ -615,7 +675,7 @@ def Main_body(gain_dict):
         fits_list, path, dirs = fits_getter()
         dim_x, dim_y, exposure, gain = fits_info(fits_list, path, gain_dict)
         print('What type of images are these?')
-        inpt = input('For bias images enter \'b\'; for dark images enter \'d\'; press \'x\' to quit.')
+        inpt = input('For bias images enter \'b\'; for dark images enter \'d\'; for a transfer curve enter \'t\'; press \'x\' to quit.')
         if inpt == 'b':
             del exposure
             stack = stacker(path, fits_list, gain, dim_x, dim_y)
@@ -630,6 +690,8 @@ def Main_body(gain_dict):
             exposure = np.array(exposure.astype(np.float32))
             dark_run(stack, dim_x, dim_y, exposure)
             return
+        elif inpt == 't':
+            pair_dict = transfer_stacker(path, fits_list, dim_x, dim_y, exposure)
         elif inpt == 'x':
             sys.exit()
         else:
