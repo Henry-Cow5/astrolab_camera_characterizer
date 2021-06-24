@@ -151,21 +151,19 @@ def list_duplicates(seq):
 
     Parameters
     ----------
-    seq : list
-        some list with repeated elements
-
+    seq : iter
+        Some iterable with repeated indices
     Returns
     -------
     gen func
-    An iterable of tuples with the element in 0 and the indices in 1
+        An iterable of tuples with the element in 0 and the indices in 1
 
     """
     
     tally = defaultdict(list)
-    for count,item in enumerate(seq):
+    for count, item in enumerate(seq):
         tally[item].append(count)
-    return ((key, locs) for key, locs in tally.items() 
-                            if len(locs)>1)
+    return ((key, locs) for key, locs in tally.items() if len(locs) > 1)
 
 def transfer_stacker(path, fits_list, dim_x, dim_y, exposure):
     """
@@ -186,8 +184,8 @@ def transfer_stacker(path, fits_list, dim_x, dim_y, exposure):
     Returns
     -------
     pair_dict : dict
-        A fictionary with the exposure time as key and the corresponding
-    image pairs
+        A dictionary with the exposure time as key and the corresponding
+        image pairs
 
     """
     
@@ -323,6 +321,24 @@ def show_array(array):
     plt.show()
     plt.close()
 
+def transfer_reduction(pair_dict):
+    var_dict = {}
+    mean_dict = {}
+    for exp, images in pair_dict.items():
+        subtraction = (images[1]-images[0])
+        mean_dict[exp] = [np.mean(image) for image in images]
+        var_dict[exp] = np.var(subtraction)/2
+    plt.figure()
+    plt.title('Transfer Curve')
+    plt.scatter(var_dict.keys(), var_dict.values())
+    m, b = np.polyfit(list(var_dict.keys()), list(var_dict.values()), deg=1)
+    keys_mult = [key*m + b for key in var_dict.keys()]
+    plt.plot(var_dict.keys(), keys_mult)
+    print(m, 1/m)
+    plt.show()
+    plt.close()
+    return
+
 def stdev_reporter(stdev, median, noise_criteria):
     """
     Shows the histogram of the standard deviation values across all pixels and
@@ -427,19 +443,19 @@ def noise_check(stack_std, median_std, dim_x, dim_y, noise_criteria, stdev_val):
                 else:
                     noisy_temp.append(0)
             elif count == len(noise_criteria)-1:
-                if (std >= (pair[0]*stdev_val + median_std) and \
-                    std < (pair[1]*stdev_val + median_std)) or \
-                    (std <= (-pair[0]*stdev_val + median_std) and \
-                      std > (-pair[1]*stdev_val + median_std)):
+                if (std >= (floor + median_std) and \
+                    std < (ceil + median_std)) or \
+                    (std <= (-floor + median_std) and \
+                      std > (-ceil + median_std)):
                         noisy_temp.append(std)
                         temp_count += 1
                 else:
                     noisy_temp.append(0)
             else:
-                if (std > (pair[0]*stdev_val + median_std) and \
-                    std <= (pair[1]*stdev_val + median_std)) or \
-                    (std < (-pair[0]*stdev_val + median_std) and \
-                      std > (-pair[1]*stdev_val + median_std)):
+                if (std > (floor + median_std) and \
+                    std <= (ceil + median_std)) or \
+                    (std < (-floor+ median_std) and \
+                      std > (-ceil + median_std)):
                         noisy_temp.append(std)
                         temp_count += 1
                 else:
@@ -691,7 +707,9 @@ def Main_body(gain_dict):
             dark_run(stack, dim_x, dim_y, exposure)
             return
         elif inpt == 't':
+            exposure = np.array(exposure.astype(np.float32))
             pair_dict = transfer_stacker(path, fits_list, dim_x, dim_y, exposure)
+            transfer_reduction(pair_dict)
         elif inpt == 'x':
             sys.exit()
         else:
