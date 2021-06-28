@@ -191,10 +191,16 @@ def transfer_stacker(path, fits_list, dim_x, dim_y, exposure):
     
     print('Reading in images')
     image_concat = [fits.getdata(path + '/' + str(fit)) for fit in fits_list]
+    image_concat = [np.squeeze(image) for image in image_concat]
     
+    #gets a subsection of the images
+    image_concat = [image[1200:1300, 1200:1300] for image in image_concat]
+    
+    #Just in case of an earlier crash
     if os.path.exists('stack.memmap'):
         os.remove('stack.memmap')
     
+    #Pairs the image pairs to their exposure times
     pair_dict = {}
     for dup in list_duplicates(exposure):
         pair_dict[dup[0]] = [image_concat[index] for index in dup[1]]
@@ -302,9 +308,8 @@ def mean_iterator(dark_dictionary):
         mean_dict_unfil[exp] = np.mean(sub_arr, axis=0)
         
     #Filtering results with sigma clipping
-    clip_criterion = 5
-    
     print('Filtering results')
+    clip_criterion = 5
     for exp, sub_arr in mean_dict_unfil.items():
         median = np.median(sub_arr)
         stdev = np.std(sub_arr)
@@ -322,21 +327,37 @@ def show_array(array):
     plt.close()
 
 def transfer_reduction(pair_dict):
-    var_dict = {}
-    mean_dict = {}
-    for exp, images in pair_dict.items():
-        subtraction = (images[1]-images[0])
-        mean_dict[exp] = [np.mean(image) for image in images]
-        var_dict[exp] = np.var(subtraction)/2
+    #list initialization
+    var_list = []
+    mean_list = []
+    
+    #Iterating through for transfer curve variables
+    for count, images in enumerate(pair_dict.values()):
+        images[0] = images[0].astype(np.int64)
+        images[1] = images[1].astype(np.int64)
+        subtraction = images[1] - images[0]
+        mean_list.append(np.mean(images[1]))
+        var_list.append(np.var(subtraction)/2)
+        
+    #Plotting transfer curve
     plt.figure()
     plt.title('Transfer Curve')
-    plt.scatter(var_dict.keys(), var_dict.values())
-    m, b = np.polyfit(list(var_dict.keys()), list(var_dict.values()), deg=1)
-    keys_mult = [key*m + b for key in var_dict.keys()]
-    plt.plot(var_dict.keys(), keys_mult)
-    print(m, 1/m)
+    plt.xlabel('Mean Counts')
+    plt.ylabel('Variance')
+    plt.scatter(mean_list, var_list)
+    
+    #Fitting regression
+    m, b = np.polyfit(mean_list, var_list, deg=1)
+    y_vals = [val*m + b for val in mean_list]
+    plt.plot(mean_list, y_vals, color='red')
+    plt.text(min(mean_list), max(var_list), 'var = ' + str(m)[0:6] 
+             + '*count + ' + str(b)[0:6])
+    plt.text(mean_list[0], max(var_list)-max(var_list)/10, 'gain : ' + str(1/m)[0:6])
+    
+    #Plot
     plt.show()
     plt.close()
+    
     return
 
 def stdev_reporter(stdev, median, noise_criteria):
@@ -502,6 +523,7 @@ def noise_getter(noisy_stds, stack, count, noise_criteria, smallest_bin):
     np.random.shuffle(noisy_std_indices)
     indices_list = noisy_std_indices.tolist()
     
+    #Creating the dictionary
     pixel_dict = {}
     count = 0
     for index_1, index_2 in indices_list:
@@ -710,6 +732,7 @@ def Main_body(gain_dict):
             exposure = np.array(exposure.astype(np.float32))
             pair_dict = transfer_stacker(path, fits_list, dim_x, dim_y, exposure)
             transfer_reduction(pair_dict)
+            return
         elif inpt == 'x':
             sys.exit()
         else:
