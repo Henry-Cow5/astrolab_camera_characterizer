@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import os
 import os.path
 import sys
+from collections import defaultdict
 
 #A way to extract the gain automatically will be added in the future.
 gain_dict = {'CSC-00085 12': 0.69, 'CSC-00085 16': 1.41, 'CSC-00542 12': 0.61,
@@ -144,6 +145,69 @@ def stacker(path, fits_list, gain, dim_x, dim_y):
     stack_converter(stack, gain)
     return (stack)
 
+def list_duplicates(seq):
+    """
+    Helper function for transfer_stacker
+
+    Parameters
+    ----------
+    seq : iter
+        Some iterable with repeated indices
+    Returns
+    -------
+    gen func
+        An iterable of tuples with the element in 0 and the indices in 1
+
+    """
+    
+    tally = defaultdict(list)
+    for count, item in enumerate(seq):
+        tally[item].append(count)
+    return ((key, locs) for key, locs in tally.items() if len(locs) > 1)
+
+def transfer_stacker(path, fits_list, dim_x, dim_y, exposure):
+    """
+    Creates a dictionary with the exposure time as key and the corresponding
+    image pairs
+    
+    Parameters
+    ----------
+    path : str
+        Path name
+    fits_list : list
+        The list of .fits file names in the gotten directory.
+    dim_x, dim_y : ints
+        number of pixels in x and y.
+    exposure : list
+        list of exposure times in same order as images
+
+    Returns
+    -------
+    pair_dict : dict
+        A dictionary with the exposure time as key and the corresponding
+        image pairs
+
+    """
+    
+    print('Reading in images')
+    image_concat = [fits.getdata(path + '/' + str(fit)) for fit in fits_list]
+    image_concat = [np.squeeze(image) for image in image_concat]
+    
+    #gets a subsection of the images
+    image_concat = [image[1200:1300, 1200:1300] for image in image_concat]
+    
+    #Just in case of an earlier crash
+    if os.path.exists('stack.memmap'):
+        os.remove('stack.memmap')
+    
+    #Pairs the image pairs to their exposure times
+    pair_dict = {}
+    for dup in list_duplicates(exposure):
+        pair_dict[dup[0]] = [image_concat[index] for index in dup[1]]
+
+    return(pair_dict)
+
+
 def stack_converter(stack, gain):
 #Converts the stack from ADU to electrons
 
@@ -244,9 +308,8 @@ def mean_iterator(dark_dictionary):
         mean_dict_unfil[exp] = np.mean(sub_arr, axis=0)
         
     #Filtering results with sigma clipping
-    clip_criterion = 5
-    
     print('Filtering results')
+    clip_criterion = 5
     for exp, sub_arr in mean_dict_unfil.items():
         median = np.median(sub_arr)
         stdev = np.std(sub_arr)
@@ -262,6 +325,40 @@ def show_array(array):
     plt.colorbar()
     plt.show()
     plt.close()
+
+def transfer_reduction(pair_dict):
+    #list initialization
+    var_list = []
+    mean_list = []
+    
+    #Iterating through for transfer curve variables
+    for count, images in enumerate(pair_dict.values()):
+        images[0] = images[0].astype(np.int64)
+        images[1] = images[1].astype(np.int64)
+        subtraction = images[1] - images[0]
+        mean_list.append(np.mean(images[1]))
+        var_list.append(np.var(subtraction)/2)
+        
+    #Plotting transfer curve
+    plt.figure()
+    plt.title('Transfer Curve')
+    plt.xlabel('Mean Counts')
+    plt.ylabel('Variance')
+    plt.scatter(mean_list, var_list)
+    
+    #Fitting regression
+    m, b = np.polyfit(mean_list, var_list, deg=1)
+    y_vals = [val*m + b for val in mean_list]
+    plt.plot(mean_list, y_vals, color='red')
+    plt.text(min(mean_list), max(var_list), 'var = ' + str(m)[0:6] 
+             + '*count + ' + str(b)[0:6])
+    plt.text(mean_list[0], max(var_list)-max(var_list)/10, 'gain : ' + str(1/m)[0:6])
+    
+    #Plot
+    plt.show()
+    plt.close()
+    
+    return
 
 def stdev_reporter(stdev, median, noise_criteria):
     """
@@ -288,14 +385,14 @@ def stdev_reporter(stdev, median, noise_criteria):
     mini = np.min(stdev)
     maxi = np.max(stdev)
     stdev_val = np.std(stdev)
-    print('stdev Min:' + str(mini))
-    print('stdev Max: ' + str(maxi))
-    print('stdev Median: ' + str(median))
-    print('stdev rms: ', np.sqrt(np.mean(stdev**2)))
-    print('stdev stdev: ' + str(stdev_val))
-    plt.title('stdev pixel value histogram')
-    plt.xlabel('Number of electrons')
-    plt.ylabel('Number of pixels')
+    print('Read Noise Min:' + str(mini))
+    print('Read Noise Max: ' + str(maxi))
+    print('Read Noise Median: ' + str(median))
+    print('Read Noise rms: ', np.sqrt(np.mean(stdev**2)))
+    print('Read Noise stdev: ' + str(stdev_val))
+    plt.title('St. Dev Pixel Value Histogram')
+    plt.xlabel('Number of Electrons')
+    plt.ylabel('Number of Pixels')
     y, _, _ = plt.hist(stdev.flatten(), bins='auto')
     
     #Creating bins
@@ -367,19 +464,19 @@ def noise_check(stack_std, median_std, dim_x, dim_y, noise_criteria, stdev_val):
                 else:
                     noisy_temp.append(0)
             elif count == len(noise_criteria)-1:
-                if (std >= (pair[0]*stdev_val + median_std) and \
-                    std < (pair[1]*stdev_val + median_std)) or \
-                    (std <= (-pair[0]*stdev_val + median_std) and \
-                      std > (-pair[1]*stdev_val + median_std)):
+                if (std >= (floor + median_std) and \
+                    std < (ceil + median_std)) or \
+                    (std <= (-floor + median_std) and \
+                      std > (-ceil + median_std)):
                         noisy_temp.append(std)
                         temp_count += 1
                 else:
                     noisy_temp.append(0)
             else:
-                if (std > (pair[0]*stdev_val + median_std) and \
-                    std <= (pair[1]*stdev_val + median_std)) or \
-                    (std < (-pair[0]*stdev_val + median_std) and \
-                      std > (-pair[1]*stdev_val + median_std)):
+                if (std > (floor + median_std) and \
+                    std <= (ceil + median_std)) or \
+                    (std < (-floor+ median_std) and \
+                      std > (-ceil + median_std)):
                         noisy_temp.append(std)
                         temp_count += 1
                 else:
@@ -426,6 +523,7 @@ def noise_getter(noisy_stds, stack, count, noise_criteria, smallest_bin):
     np.random.shuffle(noisy_std_indices)
     indices_list = noisy_std_indices.tolist()
     
+    #Creating the dictionary
     pixel_dict = {}
     count = 0
     for index_1, index_2 in indices_list:
@@ -566,7 +664,7 @@ def bias_run(stack, dim_x, dim_y, noise_criteria):
     stack_std_rms = np.sqrt(np.mean(np.square(stack_std.flatten())))
     RNNU = np.std(stack_std.flatten())/stack_std_rms
     plt.text(50, dim_y-150, 'RNNU: ' + str(RNNU*100)[0:5] + '%')
-    plt.text(50, dim_y-50, 'rms: ' + str(stack_std_rms)[0:5] + ' electrons')
+    plt.text(50, dim_y-50, 'rms: ' + str(stack_std_rms)[0:4] + ' electrons')
     plt.show()
     plt.close()
     
@@ -577,7 +675,7 @@ def bias_run(stack, dim_x, dim_y, noise_criteria):
     print('Now checking for noisy pixels')
 
 
-#Noise analysis starts here
+    #Noise analysis starts here
     noisy_stds, smallest_bin = noise_check(stack_std, median_std, dim_x, dim_y,
                                            noise_criteria, stdev_val)
     print('Smallest bin was found to be ' + str(smallest_bin) + '. This will be' +
@@ -615,7 +713,7 @@ def Main_body(gain_dict):
         fits_list, path, dirs = fits_getter()
         dim_x, dim_y, exposure, gain = fits_info(fits_list, path, gain_dict)
         print('What type of images are these?')
-        inpt = input('For bias images enter \'b\'; for dark images enter \'d\'; press \'x\' to quit.')
+        inpt = input('For bias images enter \'b\'; for dark images enter \'d\'; for a transfer curve enter \'t\'; press \'x\' to quit.')
         if inpt == 'b':
             del exposure
             stack = stacker(path, fits_list, gain, dim_x, dim_y)
@@ -629,6 +727,11 @@ def Main_body(gain_dict):
             stack = stacker(path, fits_list, gain, dim_x, dim_y)
             exposure = np.array(exposure.astype(np.float32))
             dark_run(stack, dim_x, dim_y, exposure)
+            return
+        elif inpt == 't':
+            exposure = np.array(exposure.astype(np.float32))
+            pair_dict = transfer_stacker(path, fits_list, dim_x, dim_y, exposure)
+            transfer_reduction(pair_dict)
             return
         elif inpt == 'x':
             sys.exit()
