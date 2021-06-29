@@ -117,6 +117,9 @@ def transfer_processor(exposure_dict):
         
     #Performing regression
     gain, read_noise = regressor(rms_list, mean_list, var_list)
+    gain_shape = gain.shape
+    gain = [1/m for m in gain.flatten()]
+    gain = np.reshape(gain, gain_shape)
     
     #Plotting results
     print('Now plotting results')
